@@ -8,9 +8,20 @@
 import SwiftUI
 import CoreData
 
+extension Color {
+    static let background = Color(UIColor.systemBackground) // Passt sich an den Hell-/Dunkelmodus an
+}
+extension Color {
+    static let separator = Color(UIColor.separator)
+}
+
+
+
 struct ContentView: View {
     @State private var newProductName: String = "" // Eingabefeld für den Produktnamen
     @State private var isAddingItem: Bool = false  // Steuerung, ob das Eingabefeld angezeigt wird
+    @State private var editingItem: ShoppingItem? = nil
+    @State private var keyboardHeight: CGFloat = 0 // Höhe der Tastatur
     @Environment(\.managedObjectContext) private var viewContext
     
     @FetchRequest(
@@ -20,78 +31,121 @@ struct ContentView: View {
     
     var body: some View {
         NavigationView {
-            ZStack {
-                Color(.systemGroupedBackground) // Standard-Grauton von iOS
+            ZStack(alignment: .bottom) { // Alignment sorgt für bessere Platzierung
+                
+                // Hintergrundfarbe
+                Color(.systemGroupedBackground)
                     .ignoresSafeArea()
+                
                 // Liste der Produkte
-                VStack {
+                VStack(spacing: 0) {
                     List {
                         ForEach(items) { item in
                             HStack {
-                                Text(item.name ?? "Unbenannt")
+                                if editingItem == item {
+                                    // Textfeld für Live-Bearbeitung
+                                    TextField("Produktname eingeben", text: Binding(
+                                        get: { item.name ?? "" },
+                                        set: { item.name = $0 }
+                                    ))
+                                    .padding(6)
+                                    .padding(.leading, 8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 20) // Abgerundeter Rahmen
+                                            .fill(Color(.systemGray6)))
+                                    .onSubmit {
+                                        saveContext()
+                                        editingItem = nil
+                                    }
+                                } else {
+                                    Text(item.name ?? "Unbenannt")
+                                }
                                 Spacer()
                                 ZStack {
                                     Circle()
                                         .fill(item.isChecked ? Color.green : Color.gray)
-                                        .opacity(item.isChecked ? 1.0 : 0.5) // Verringert die Deckkraft des grauen Kreises
+                                        .opacity(item.isChecked ? 1.0 : 0.5)
                                         .frame(width: 24, height: 24)
                                     if item.isChecked {
                                         Image(systemName: "checkmark")
-                                            .foregroundColor(.white) // Weißer Haken
+                                            .foregroundColor(.white)
                                     }
                                 }
                             }
                             .onTapGesture {
                                 withAnimation {
-                                    item.isChecked.toggle() // Zustand ändern (abgehakt/nicht abgehakt)
+                                    item.isChecked.toggle()
                                     saveContext()
                                 }
                             }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    deleteItem(item)
+                                } label: {
+                                    Label("Löschen", systemImage: "trash")
+                                }
+                                
+                                Button {
+                                    editingItem = item
+                                } label: {
+                                    Label("Bearbeiten", systemImage: "pencil")
+                                }
+                                .tint(.blue)
+                            }
                         }
-                        
                         .onDelete(perform: deleteItems)
                     }
-                    .padding(.bottom, isAddingItem ? 190 :190)
                     
                     if items.isEmpty {
                         Text("Keine Einträge vorhanden")
                             .foregroundColor(.gray)
                     }
                 }
+                .padding(.bottom,0) // Platz für Tastatur
                 
-                // Eingabefeld und schwebender Button
-                VStack {
-                    Spacer()
-                    
-                    // Eingabefeld erscheint, wenn `isAddingItem` aktiv ist
-                    if isAddingItem {
+                // Eingabefeld für neues Item
+                if isAddingItem {
+                    VStack {
                         HStack {
                             TextField("Produktname eingeben", text: $newProductName)
-                                .padding() // Innenabstand
-                                .background(Color(.white)) // Weißer Hintergrund
-                                .cornerRadius(8) // Abgerundete Ecken
-                                .foregroundColor(.black) // Textfarbe explizit auf Schwarz setzen
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.gray.opacity(0.3), lineWidth: 1) // Grauer Rahmen
-                                )
-                                .padding(6.0)
+                            
+                                .padding(6)
+                                .padding(.leading, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 20) // Abgerundeter Rahmen
+                                        .fill(Color(.systemGray6)))
                             
                             
                             Button("Hinzufügen") {
-                                addItem() // Neuen Eintrag erstellen
-                                isAddingItem = false // Eingabemodus beenden
+                                addItem()
+                                isAddingItem = false
                             }
-                            .padding(.trailing)
-                            .disabled(newProductName.isEmpty) // Button deaktiviert, wenn das Feld leer ist
+                            
+                            .disabled(newProductName.isEmpty)
                         }
-                        .padding()
+                        .padding(12)
+                        .cornerRadius(12)
+                        .shadow(radius: 2)
+                        
                     }
-                    
-                    
-                    // Schwebe-Button unten mittig
+                    .background(
+                        RoundedRectangle(cornerRadius: 0)
+                            .fill(Color.background)
+                            .overlay(
+                                Rectangle()
+                                    .frame(height: 1) // Höhe des oberen Rahmens
+                                    .foregroundColor(Color.separator) // Farbe des Rahmens
+                                    .padding(.top, -1), // Position direkt oben
+                                alignment: .top // Am oberen Rand ausrichten
+                            )// Erweiterung verwenden
+                    )
+                    .animation(.easeOut, value: keyboardHeight)
+                }
+                
+                // Schwebe-Button
+                if !isAddingItem {
                     Button(action: {
-                        isAddingItem.toggle()
+                        isAddingItem = true
                     }) {
                         Image(systemName: "plus")
                             .font(.largeTitle)
@@ -100,21 +154,33 @@ struct ContentView: View {
                             .background(Circle().fill(Color(hex: "017eff")))
                             .shadow(radius: 10)
                     }
-                    .padding(.bottom, 20) // Abstand vom unteren Bildschirmrand
+                    .padding(.bottom, keyboardHeight + 20) // Dynamisch oberhalb der Tastatur
+                    .animation(.easeOut, value: keyboardHeight)
                 }
             }
             .navigationTitle("Einkaufsliste")
+            .onAppear {
+                startObservingKeyboard() // Beobachten der Tastatur
+            }
+            .onDisappear {
+                stopObservingKeyboard() // Beenden der Beobachtung
+            }
         }
     }
     
     private func addItem() {
         withAnimation {
             let newItem = ShoppingItem(context: viewContext)
-            newItem.name = newProductName // Nutzt den eingegebenen Produktnamen
-            newItem.isChecked = false // Standardmäßig nicht abgehakt
+            newItem.name = newProductName
+            newItem.isChecked = false
             saveContext()
-            newProductName = "" // Eingabefeld zurücksetzen
+            newProductName = ""
         }
+    }
+    
+    private func deleteItem(_ item: ShoppingItem) {
+        viewContext.delete(item)
+        saveContext()
     }
     
     private func deleteItems(offsets: IndexSet) {
@@ -131,6 +197,24 @@ struct ContentView: View {
             let nsError = error as NSError
             fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
         }
+    }
+    
+    private func startObservingKeyboard() {
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { notification in
+            if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                let screenHeight = UIScreen.main.bounds.height
+                self.keyboardHeight = max(0, screenHeight - frame.origin.y)
+            }
+        }
+        
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+            self.keyboardHeight = 0
+        }
+    }
+    
+    private func stopObservingKeyboard() {
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
     }
 }
 
