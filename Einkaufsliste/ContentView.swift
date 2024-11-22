@@ -15,13 +15,12 @@ extension Color {
     static let separator = Color(UIColor.separator)
 }
 
-
-
 struct ContentView: View {
     @State private var newProductName: String = "" // Eingabefeld für den Produktnamen
     @State private var isAddingItem: Bool = false  // Steuerung, ob das Eingabefeld angezeigt wird
     @State private var editingItem: ShoppingItem? = nil
     @State private var keyboardHeight: CGFloat = 0 // Höhe der Tastatur
+    @FocusState private var isKeyboardVisible: Bool // Steuerung des Tastaturfokus
     @Environment(\.managedObjectContext) private var viewContext
     
     @FetchRequest(
@@ -31,16 +30,14 @@ struct ContentView: View {
     
     var body: some View {
         NavigationView {
-            ZStack(alignment: .bottom) { // Alignment sorgt für bessere Platzierung
-                
+            ZStack(alignment: .bottom) {
                 // Hintergrundfarbe
                 Color(.systemGroupedBackground)
                     .ignoresSafeArea()
                 
-                // Liste der Produkte
                 VStack(spacing: 0) {
                     List {
-                        ForEach(items) { item in
+                        ForEach(items, id: \.objectID) { item in
                             HStack {
                                 if editingItem == item {
                                     // Textfeld für Live-Bearbeitung
@@ -52,7 +49,8 @@ struct ContentView: View {
                                     .padding(.leading, 8)
                                     .background(
                                         RoundedRectangle(cornerRadius: 20) // Abgerundeter Rahmen
-                                            .fill(Color(.systemGray6)))
+                                            .fill(Color(.systemGray6))
+                                    )
                                     .onSubmit {
                                         saveContext()
                                         editingItem = nil
@@ -75,6 +73,7 @@ struct ContentView: View {
                             .onTapGesture {
                                 withAnimation {
                                     item.isChecked.toggle()
+                                    print("Item \(item.name ?? "Unbenannt") ist jetzt \(item.isChecked ? "abgehakt" : "nicht abgehakt")")
                                     saveContext()
                                 }
                             }
@@ -101,26 +100,27 @@ struct ContentView: View {
                             .foregroundColor(.gray)
                     }
                 }
-                .padding(.bottom,0) // Platz für Tastatur
+                .padding(.bottom, 0) // Platz für Tastatur
                 
                 // Eingabefeld für neues Item
                 if isAddingItem {
                     VStack {
                         HStack {
                             TextField("Produktname eingeben", text: $newProductName)
-                            
+                                .focused($isKeyboardVisible)
                                 .padding(6)
                                 .padding(.leading, 8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 20) // Abgerundeter Rahmen
                                         .fill(Color(.systemGray6)))
                             
-                            
-                            Button("Hinzufügen") {
+                            Button(action: {
                                 addItem()
-                                isAddingItem = false
+                            }) {
+                                Image(systemName: "plus.circle")
+                                    .font(.largeTitle) // Größe des Symbols
+                                    .foregroundColor(.blue) // Farbe des Symbols
                             }
-                            
                             .disabled(newProductName.isEmpty)
                         }
                         .padding(12)
@@ -131,21 +131,22 @@ struct ContentView: View {
                     .background(
                         RoundedRectangle(cornerRadius: 0)
                             .fill(Color.background)
+                            .ignoresSafeArea(edges: .bottom)
                             .overlay(
                                 Rectangle()
                                     .frame(height: 1) // Höhe des oberen Rahmens
-                                    .foregroundColor(Color.separator) // Farbe des Rahmens
+                                    .foregroundColor(Color.separator)
                                     .padding(.top, -1), // Position direkt oben
                                 alignment: .top // Am oberen Rand ausrichten
-                            )// Erweiterung verwenden
+                            )
                     )
-                    .animation(.easeOut, value: keyboardHeight)
                 }
                 
                 // Schwebe-Button
                 if !isAddingItem {
                     Button(action: {
                         isAddingItem = true
+                        isKeyboardVisible = true // Fokus setzen
                     }) {
                         Image(systemName: "plus")
                             .font(.largeTitle)
@@ -154,8 +155,6 @@ struct ContentView: View {
                             .background(Circle().fill(Color(hex: "017eff")))
                             .shadow(radius: 10)
                     }
-                    .padding(.bottom, keyboardHeight + 20) // Dynamisch oberhalb der Tastatur
-                    .animation(.easeOut, value: keyboardHeight)
                 }
             }
             .navigationTitle("Einkaufsliste")
@@ -166,6 +165,10 @@ struct ContentView: View {
                 stopObservingKeyboard() // Beenden der Beobachtung
             }
         }
+    }
+    
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     private func addItem() {
