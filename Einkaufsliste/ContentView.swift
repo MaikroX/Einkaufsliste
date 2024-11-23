@@ -19,8 +19,8 @@ struct ContentView: View {
     @State private var newProductName: String = "" // Eingabefeld für den Produktnamen
     @State private var isAddingItem: Bool = false  // Steuerung, ob das Eingabefeld angezeigt wird
     @State private var editingItem: ShoppingItem? = nil
-    @State private var keyboardHeight: CGFloat = 0 // Höhe der Tastatur
-    @FocusState private var isKeyboardVisible: Bool // Steuerung des Tastaturfokus
+    @State private var showAlert: Bool = false     // Zustand für das Alert
+    @FocusState private var focusedItemID: NSManagedObjectID? // Steuerung des Fokus auf eine Zeile
     @Environment(\.managedObjectContext) private var viewContext
     
     @FetchRequest(
@@ -35,22 +35,36 @@ struct ContentView: View {
                 Color(.systemGroupedBackground)
                     .ignoresSafeArea()
                 
+                if items.isEmpty {
+                    VStack {
+                        Spacer()
+                        Text("Deine Einkaufsliste ist leer")
+                            .foregroundColor(.gray)
+                            .font(.headline)
+                            .padding(.bottom, 80)
+                        Spacer()
+                    }
+                }
+                
                 VStack(spacing: 0) {
                     List {
                         ForEach(items, id: \.objectID) { item in
                             HStack {
                                 if editingItem == item {
-                                    // Textfeld für Live-Bearbeitung
-                                    TextField("Produktname eingeben", text: Binding(
+                                    TextField("Produktname ändern", text: Binding(
                                         get: { item.name ?? "" },
                                         set: { item.name = $0 }
                                     ))
                                     .padding(6)
                                     .padding(.leading, 8)
                                     .background(
-                                        RoundedRectangle(cornerRadius: 20) // Abgerundeter Rahmen
+                                        RoundedRectangle(cornerRadius: 20)
                                             .fill(Color(.systemGray6))
                                     )
+                                    .focused($focusedItemID, equals: item.objectID) // Fokus auf diese Zeile setzen
+                                    .onAppear {
+                                        focusedItemID = item.objectID // Fokus aktivieren
+                                    }
                                     .onSubmit {
                                         saveContext()
                                         editingItem = nil
@@ -73,7 +87,6 @@ struct ContentView: View {
                             .onTapGesture {
                                 withAnimation {
                                     item.isChecked.toggle()
-                                    print("Item \(item.name ?? "Unbenannt") ist jetzt \(item.isChecked ? "abgehakt" : "nicht abgehakt")")
                                     saveContext()
                                 }
                             }
@@ -86,6 +99,7 @@ struct ContentView: View {
                                 
                                 Button {
                                     editingItem = item
+                                    focusedItemID = item.objectID // Fokus setzen, wenn auf Bearbeiten geklickt wird
                                 } label: {
                                     Label("Bearbeiten", systemImage: "pencil")
                                 }
@@ -93,11 +107,6 @@ struct ContentView: View {
                             }
                         }
                         .onDelete(perform: deleteItems)
-                    }
-                    
-                    if items.isEmpty {
-                        Text("Keine Einträge vorhanden")
-                            .foregroundColor(.gray)
                     }
                 }
                 .padding(.bottom, 0) // Platz für Tastatur
@@ -107,38 +116,29 @@ struct ContentView: View {
                     VStack {
                         HStack {
                             TextField("Produktname eingeben", text: $newProductName)
-                                .focused($isKeyboardVisible)
                                 .padding(6)
                                 .padding(.leading, 8)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 20) // Abgerundeter Rahmen
+                                    RoundedRectangle(cornerRadius: 20)
                                         .fill(Color(.systemGray6)))
                             
                             Button(action: {
                                 addItem()
                             }) {
                                 Image(systemName: "plus.circle")
-                                    .font(.largeTitle) // Größe des Symbols
-                                    .foregroundColor(.blue) // Farbe des Symbols
+                                    .font(.largeTitle)
+                                    .foregroundColor(.blue)
                             }
                             .disabled(newProductName.isEmpty)
                         }
                         .padding(12)
                         .cornerRadius(12)
                         .shadow(radius: 2)
-                        
                     }
                     .background(
                         RoundedRectangle(cornerRadius: 0)
                             .fill(Color.background)
                             .ignoresSafeArea(edges: .bottom)
-                            .overlay(
-                                Rectangle()
-                                    .frame(height: 1) // Höhe des oberen Rahmens
-                                    .foregroundColor(Color.separator)
-                                    .padding(.top, -1), // Position direkt oben
-                                alignment: .top // Am oberen Rand ausrichten
-                            )
                     )
                 }
                 
@@ -146,7 +146,6 @@ struct ContentView: View {
                 if !isAddingItem {
                     Button(action: {
                         isAddingItem = true
-                        isKeyboardVisible = true // Fokus setzen
                     }) {
                         Image(systemName: "plus")
                             .font(.largeTitle)
@@ -155,20 +154,29 @@ struct ContentView: View {
                             .background(Circle().fill(Color(hex: "017eff")))
                             .shadow(radius: 10)
                     }
+                    .padding(.bottom, 20)
                 }
             }
-            .navigationTitle("Einkaufsliste")
-            .onAppear {
-                startObservingKeyboard() // Beobachten der Tastatur
+            .navigationTitle("Meine Einkaufsliste")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if !items.isEmpty {
+                        Button(action: {
+                            showAlert = true // Alert anzeigen
+                        }) {
+                            Image(systemName: "trash")
+                        }
+                    }
+                }
             }
-            .onDisappear {
-                stopObservingKeyboard() // Beenden der Beobachtung
+            .alert("Einkaufsliste leeren?", isPresented: $showAlert) {
+                Button("Abbrechen", role: .cancel) { }
+                Button("Löschen", role: .destructive) {
+                    deleteAllItems()
+                }
             }
         }
-    }
-    
-    private func dismissKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     private func addItem() {
@@ -193,6 +201,15 @@ struct ContentView: View {
         }
     }
     
+    private func deleteAllItems() {
+        withAnimation {
+            for item in items {
+                viewContext.delete(item)
+            }
+            saveContext()
+        }
+    }
+    
     private func saveContext() {
         do {
             try viewContext.save()
@@ -200,24 +217,6 @@ struct ContentView: View {
             let nsError = error as NSError
             fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
         }
-    }
-    
-    private func startObservingKeyboard() {
-        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { notification in
-            if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-                let screenHeight = UIScreen.main.bounds.height
-                self.keyboardHeight = max(0, screenHeight - frame.origin.y)
-            }
-        }
-        
-        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
-            self.keyboardHeight = 0
-        }
-    }
-    
-    private func stopObservingKeyboard() {
-        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
-        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
     }
 }
 
